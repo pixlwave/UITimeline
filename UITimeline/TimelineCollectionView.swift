@@ -6,38 +6,41 @@
 //
 
 import SwiftUI
-import Combine
 
 class TimelineItemSwiftUICell: UICollectionViewCell {
     var timelineItem: TextRoomTimelineItem?
 }
 
 struct TimelineCollectionView: UIViewRepresentable {
-    @EnvironmentObject private var context: RoomScreenContext
+    @EnvironmentObject private var viewModelContext: RoomScreenContext
     
     func makeUIView(context: Context) -> UICollectionView {
-        var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
-        configuration.showsSeparators = false
-        let layout = UICollectionViewCompositionalLayout.list(using: configuration)
-        let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        let collectionView = UICollectionView(frame: .zero, collectionViewLayout: context.coordinator.makeLayout())
         context.coordinator.collectionView = collectionView
         return collectionView
     }
     
     func updateUIView(_ uiView: UICollectionView, context: Context) {
-        // nothing to update yet
+        context.coordinator.timelineItems = viewModelContext.viewState.items
+        context.coordinator.isBackPaginating = viewModelContext.viewState.isBackPaginating
+        context.coordinator.loadPreviousPage = { viewModelContext.send(viewAction: .loadPreviousPage) }
     }
     
     func makeCoordinator() -> Coordinator {
-        Coordinator(context: context)
+        Coordinator()
     }
     
     // MARK: - Coordinator
     
     @MainActor
     class Coordinator: NSObject {
-        let context: RoomScreenContext
-        var contextCancellable: AnyCancellable?
+        var timelineItems: [TextRoomTimelineItem] = [] {
+            didSet {
+                applySnapshot()
+            }
+        }
+        var isBackPaginating = false
+        var loadPreviousPage: (() -> Void)?
         
         var dataSource: UICollectionViewDiffableDataSource<TimelineSection, TextRoomTimelineItem>?
         var collectionView: UICollectionView? {
@@ -46,19 +49,13 @@ struct TimelineCollectionView: UIViewRepresentable {
             }
         }
         
-        init(context: RoomScreenContext) {
-            self.context = context
-            super.init()
-            
-            contextCancellable = context.objectWillChange.sink {
-                // Dispatched because of the *will* change
-                DispatchQueue.main.async { [weak self] in
-                    self?.applySnapshot()
-                }
-            }
+        func makeLayout() -> UICollectionViewCompositionalLayout {
+            var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
+            configuration.showsSeparators = false
+            return UICollectionViewCompositionalLayout.list(using: configuration)
         }
         
-        func configureDataSource() {
+        private func configureDataSource() {
             guard let collectionView else { return }
             let cellRegistration = UICollectionView.CellRegistration<TimelineItemSwiftUICell, TextRoomTimelineItem> { cell, indexPath, timelineItem in
                 cell.timelineItem = timelineItem
@@ -81,7 +78,7 @@ struct TimelineCollectionView: UIViewRepresentable {
             
             var snapshot = NSDiffableDataSourceSnapshot<TimelineSection, TextRoomTimelineItem>()
             snapshot.appendSections([.main])
-            snapshot.appendItems(context.viewState.items)
+            snapshot.appendItems(timelineItems)
             dataSource?.apply(snapshot, animatingDifferences: false)
             
             if previousLayout.isBottomVisible || previousLayout.isEmpty {
@@ -118,7 +115,7 @@ struct TimelineCollectionView: UIViewRepresentable {
         }
         
         func scrollToBottom(animated: Bool) {
-            guard let lastItem = context.viewState.items.last,
+            guard let lastItem = timelineItems.last,
                   let lastIndexPath = dataSource?.indexPath(for: lastItem)
             else { return }
             
@@ -140,8 +137,8 @@ struct TimelineCollectionView: UIViewRepresentable {
 
 extension TimelineCollectionView.Coordinator: UICollectionViewDelegate {
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        guard !context.viewState.isBackPaginating, scrollView.contentOffset.y < 100 else { return }
-        context.send(viewAction: .loadPreviousPage)
+        guard !isBackPaginating, scrollView.contentOffset.y < 100 else { return }
+        loadPreviousPage?()
         print("Loading page \(Date().formatted(.dateTime.second().secondFraction(.milliseconds(2))))")
     }
 }
