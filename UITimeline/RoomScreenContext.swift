@@ -6,12 +6,25 @@
 //
 
 import Foundation
+import Combine
 
 @MainActor
 class RoomScreenContext: ObservableObject {
     @Published var viewState = RoomScreenViewState(roomId: "testroom")
     
+    let loadPreviousPagePublisher = PassthroughSubject<Void, Never>()
+    var cancellables: Set<AnyCancellable> = []
+    
     private let mySenderID = "@me:home.org"
+    
+    init() {
+        loadPreviousPagePublisher
+            .collect(.byTime(DispatchQueue.main, 0.1))
+            .sink { [weak self] _ in
+                self?.send(viewAction: .loadPreviousPage)
+            }
+            .store(in: &cancellables)
+    }
     
     func send(viewAction: RoomScreenViewAction) {
         switch viewAction {

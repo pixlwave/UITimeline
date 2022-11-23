@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Combine
 
 class TimelineItemSwiftUICell: UICollectionViewCell {
     var timelineItem: TextRoomTimelineItem?
@@ -13,17 +14,19 @@ class TimelineItemSwiftUICell: UICollectionViewCell {
 
 struct TimelineCollectionView: UIViewRepresentable {
     @EnvironmentObject private var viewModelContext: RoomScreenContext
+    @Environment(\.timelineStyle) private var timelineStyle
     
     func makeUIView(context: Context) -> UICollectionView {
         let collectionView = UICollectionView(frame: .zero, collectionViewLayout: context.coordinator.makeLayout())
         context.coordinator.collectionView = collectionView
+        context.coordinator.loadPreviousPagePublisher = viewModelContext.loadPreviousPagePublisher
         return collectionView
     }
     
     func updateUIView(_ uiView: UICollectionView, context: Context) {
         context.coordinator.timelineItems = viewModelContext.viewState.items
         context.coordinator.isBackPaginating = viewModelContext.viewState.isBackPaginating
-        context.coordinator.loadPreviousPage = { viewModelContext.send(viewAction: .loadPreviousPage) }
+        context.coordinator.timelineStyle = timelineStyle
     }
     
     func makeCoordinator() -> Coordinator {
@@ -34,20 +37,27 @@ struct TimelineCollectionView: UIViewRepresentable {
     
     @MainActor
     class Coordinator: NSObject {
+        enum Constants {
+            /// The distance from the top before back pagination will begin.
+            static let paginationThreshold: Double = 100
+        }
+        
+        var collectionView: UICollectionView? {
+            didSet {
+                configureDataSource()
+            }
+        }
+        var loadPreviousPagePublisher = PassthroughSubject<Void, Never>()
+        
         var timelineItems: [TextRoomTimelineItem] = [] {
             didSet {
                 applySnapshot()
             }
         }
         var isBackPaginating = false
-        var loadPreviousPage: (() -> Void)?
+        var timelineStyle: TimelineStyle = .bubbles
         
-        var dataSource: UICollectionViewDiffableDataSource<TimelineSection, TextRoomTimelineItem>?
-        var collectionView: UICollectionView? {
-            didSet {
-                configureDataSource()
-            }
-        }
+        private var dataSource: UICollectionViewDiffableDataSource<TimelineSection, TextRoomTimelineItem>?
         
         func makeLayout() -> UICollectionViewCompositionalLayout {
             var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
@@ -67,6 +77,8 @@ struct TimelineCollectionView: UIViewRepresentable {
                     TextRoomTimelineView(timelineItem: timelineItem)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .margins(.all, self.timelineStyle.rowInsets)
+                
                 return cell
             }
             
@@ -137,8 +149,7 @@ struct TimelineCollectionView: UIViewRepresentable {
 
 extension TimelineCollectionView.Coordinator: UICollectionViewDelegate {
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        guard !isBackPaginating, scrollView.contentOffset.y < 100 else { return }
-        loadPreviousPage?()
-        print("Loading page \(Date().formatted(.dateTime.second().secondFraction(.milliseconds(2))))")
+        guard !isBackPaginating, scrollView.contentOffset.y < Constants.paginationThreshold else { return }
+        loadPreviousPagePublisher.send(())
     }
 }
