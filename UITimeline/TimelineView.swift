@@ -21,11 +21,6 @@ struct TimelineView: View {
                     }
                 }
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Load") {
-                        context.send(viewAction: .loadPreviousPage)
-                    }
-                }
-                ToolbarItem(placement: .cancellationAction) {
                     Button("Edits") {
                         context.send(viewAction: .editAll)
                     }
